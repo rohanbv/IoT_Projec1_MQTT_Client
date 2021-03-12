@@ -66,6 +66,7 @@
 #include "uart0.h"
 #include "wait.h"
 #include "eth0.h"
+#include "eeprom.h"
 #include "tm4c123gh6pm.h"
 
 // Pins
@@ -74,6 +75,11 @@
 #define GREEN_LED PORTF,3
 #define PUSH_BUTTON PORTF,4
 
+//Macros
+#define IP_STORED_PERSISTENTLY  100
+#define MQTT_STORED_PERSITENTLY 200
+#define IP_IN_EEPROM            readEeprom(0x0000) == IP_STORED_PERSISTENTLY
+#define MQTT_IN_EEPROM          readEeprom(0x0010) == MQTT_STORED_PERSITENTLY
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -145,6 +151,26 @@ void displayConnectionInfo()
             putcUart0('.');
     }
     putsUart0("\r\n");
+    etherGetMqttBrokerIpAddress(ip);
+    putsUart0("MQTT: ");
+    for (i = 0; i < 4; i++)
+    {
+        sprintf(str, "%u", ip[i]);
+        putsUart0(str);
+        if (i < 4-1)
+            putcUart0('.');
+    }
+    putsUart0("\r\n");
+    etherGetMqttBrokerMacAddress(mac);
+    putsUart0("MQTT HW: ");
+    for (i = 0; i < 6; i++)
+    {
+        sprintf(str, "%02x", mac[i]);
+        putsUart0(str);
+        if (i < 6-1)
+            putcUart0(':');
+    }
+    putsUart0("\r\n");
     if (etherIsLinkUp())
         putsUart0("Link is up\r\n");
     else
@@ -164,6 +190,8 @@ int main(void)
     uint8_t* udpData;
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader*) buffer;
+    socket s;
+    USER_DATA info;
 
     // Init controller
     initHw();
@@ -172,16 +200,32 @@ int main(void)
     initUart0();
     setUart0BaudRate(115200, 40e6);
 
+    // Setup EEPROM
+    initEeprom();
+
     // Init ethernet interface (eth0)
-    putsUart0("\r\nStarting eth0\r\n");
+    putsUart0("Starting eth0\r\n");
     etherSetMacAddress(2, 3, 4, 5, 6, 112);
     etherDisableDhcpMode();
-    etherSetIpAddress(192, 168, 1, 112);
+
+    // Retrieve IP address from the one stored in EEPROM
+    if(IP_IN_EEPROM)
+        etherSetIpAddress(readEeprom(0x0060),readEeprom(0x0061),readEeprom(0x0062),readEeprom(0x0063));
+    else
+        etherSetIpAddress(192, 168, 1, 112);
+
+
+    //Retrieve Mqtt Broker IP address if stored in EEPROM
+    if(MQTT_IN_EEPROM)
+        etherSetMqttBrokerIp(readEeprom(0x0080),readEeprom(0x0081),readEeprom(0x0082),readEeprom(0x0083));
+    else
+        etherSetMqttBrokerIp(0, 0, 0, 0);
+
     etherSetIpSubnetMask(255, 255, 255, 0);
     etherSetIpGatewayAddress(192, 168, 1, 1);
     etherInit(ETHER_UNICAST | ETHER_BROADCAST | ETHER_HALFDUPLEX);
     waitMicrosecond(100000);
-    displayConnectionInfo();
+//  displayConnectionInfo();
 
     // Flash LED
     setPinValue(GREEN_LED, 1);
@@ -197,6 +241,56 @@ int main(void)
         // Put terminal processing here
         if (kbhitUart0())
         {
+            getsUart0(&info);        //get uart data into a USER INFO structure
+            putsUart0(info.buffer);  //display the info onto the terminal
+            putsUart0("\n\r");
+            parseFields(&info);      //parse information in the buffer and store it in the structure
+            //Is Command Reboot, Yes then perform Reset
+            if(isCommand(&info, "REBOOT", 0))
+            {
+                putsUart0("Is a Valid Command for Reset,Performing System Reset\r\n");
+                waitMicrosecond(10000);
+                NVIC_APINT_R = NVIC_APINT_VECTKEY | NVIC_APINT_SYSRESETREQ ;
+            }
+            //Is command Status,if yes display
+            else if(isCommand(&info, "STATUS", 0))
+            {
+                displayConnectionInfo();
+            }
+            //Is Command Set, if yes set IP
+            else if(isCommand(&info, "SET", 2))
+            {
+                if(stringCompare(getFieldString(&info, 2), "IP"))
+                {
+                    etherSetIpAddress(getFieldInt(&info,3),getFieldInt(&info,4),getFieldInt(&info,5),getFieldInt(&info,6));
+                    writeEeprom(0x0000,IP_STORED_PERSISTENTLY);
+                    writeEeprom(0x0060,getFieldInt(&info,3));
+                    writeEeprom(0x0061,getFieldInt(&info,4));
+                    writeEeprom(0x0062,getFieldInt(&info,5));
+                    writeEeprom(0x0063,getFieldInt(&info,6));
+                }
+                else if(stringCompare(getFieldString(&info, 2), "MQTT"))
+                {
+                    etherSetMqttBrokerIp(getFieldInt(&info, 3), getFieldInt(&info, 4), getFieldInt(&info, 5), getFieldInt(&info, 6));
+                    writeEeprom(0x0010, MQTT_STORED_PERSITENTLY);
+                    writeEeprom(0x0080,getFieldInt(&info,3));
+                    writeEeprom(0x0081,getFieldInt(&info,4));
+                    writeEeprom(0x0082,getFieldInt(&info,5));
+                    writeEeprom(0x0083,getFieldInt(&info,6));
+                }
+            }
+            //Is command Connect,Send arp and get MAC address of MQTT server
+            else if(isCommand(&info, "CONNECT", 0))
+            {
+                uint8_t mqttBIp[4];
+                etherGetMqttBrokerIpAddress(mqttBIp);
+                etherSendArpRequest(data,mqttBIp);
+            }
+            else
+            {
+                putsUart0("Enter a Valid Command\r\n");
+            }
+
         }
 
         // Packet processing
@@ -216,6 +310,13 @@ int main(void)
             if (etherIsArpRequest(data))
             {
                 etherSendArpResponse(data);
+            }
+
+            //Handle ARP Reply
+            if(etherIsArpReply(data))
+            {
+                etherStoreMqttMacAddress(data);
+                etherSendTcp(data, &s, 0);
             }
 
             // Handle IP datagram

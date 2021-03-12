@@ -126,6 +126,16 @@ typedef struct _tcpHeader // 20 or more bytes
   uint8_t  data[0];
 } tcpHeader;
 
+typedef struct _socket
+{
+  uint16_t sourcePort;
+  uint8_t  sourceIp[4];
+  uint8_t  sourceAddress[6];
+  uint16_t destPort;
+  uint8_t  destIp[4];
+  uint8_t  destAddress[6];
+} socket;
+
 #define ETHER_UNICAST        0x80
 #define ETHER_BROADCAST      0x01
 #define ETHER_MULTICAST      0x02
@@ -161,6 +171,7 @@ void etherSendPingResponse(etherHeader *ether);
 bool etherIsArpRequest(etherHeader *ether);
 void etherSendArpResponse(etherHeader *ether);
 void etherSendArpRequest(etherHeader *ether, uint8_t ip[]);
+bool etherIsArpReply(etherHeader* ether);
 
 bool etherIsUdp(etherHeader *ether);
 uint8_t* etherGetUdpData(etherHeader *ether);
@@ -178,6 +189,15 @@ void etherSetIpSubnetMask(uint8_t mask0, uint8_t mask1, uint8_t mask2, uint8_t m
 void etherGetIpSubnetMask(uint8_t mask[4]);
 void etherSetMacAddress(uint8_t mac0, uint8_t mac1, uint8_t mac2, uint8_t mac3, uint8_t mac4, uint8_t mac5);
 void etherGetMacAddress(uint8_t mac[6]);
+
+void etherSetMqttBrokerIp(uint8_t mqttBIp0,uint8_t mqttBIp1,uint8_t mqttBIp2,uint8_t mqttBIp3);
+void etherGetMqttBrokerIpAddress(uint8_t mqttBIp[4]);
+void etherSetMqttBrokerHW(uint8_t mqttBMac0,uint8_t mqttBMac1,uint8_t mqttBMac2,uint8_t mqttBMac3,uint8_t mqttBMac4,uint8_t mqttBMac5);
+void etherGetMqttBrokerMacAddress(uint8_t mqttBMac[6]);
+void etherStoreMqttMacAddress(etherHeader* ether);
+void etherFillUpMqttConnectionSocket();
+
+void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags);
 
 uint16_t htons(uint16_t value);
 #define ntohs htons

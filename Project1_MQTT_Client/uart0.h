@@ -22,6 +22,20 @@
 #define UART0_H_
 
 //-----------------------------------------------------------------------------
+// GLOBAL Declarations
+//-----------------------------------------------------------------------------
+
+#define MAX_CHARS 80
+#define MAX_FIELDS 30
+typedef struct _USER_DATA
+        {
+            char buffer[MAX_CHARS+1];
+            uint8_t fieldCount;
+            uint8_t fieldPositon[MAX_FIELDS];
+            char fieldType[MAX_FIELDS];
+        } USER_DATA;
+
+//-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
 
@@ -31,5 +45,14 @@ void putcUart0(char c);
 void putsUart0(char* str);
 char getcUart0(void);
 bool kbhitUart0(void);
+void getsUart0(USER_DATA* data);
+void parseFields(USER_DATA* data);
+char* getFieldString(USER_DATA* data,uint8_t fieldNumber);
+uint32_t getFieldInt(USER_DATA* data,uint8_t fieldNumber);
+float getFieldFloat(USER_DATA* data,uint8_t fieldNumber);
+bool isCommand(USER_DATA* data,char verb[20],uint8_t minField);
+bool stringCompare(char str1[], char str2[]);
+char* itoa(int num,char* str, int base);
+void reverse(char* s, uint8_t l);
 
 #endif

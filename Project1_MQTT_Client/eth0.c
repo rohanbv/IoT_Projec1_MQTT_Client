@@ -117,6 +117,10 @@
 #define IP_ADD_LENGTH 4
 #define HW_ADD_LENGTH 6
 
+
+// TCP Flags
+#define TCP_SYNC 0x02
+
 // ------------------------------------------------------------------------------
 //  Globals
 // ------------------------------------------------------------------------------
@@ -128,6 +132,8 @@ uint8_t macAddress[HW_ADD_LENGTH] = {2,3,4,5,6,7};
 uint8_t ipAddress[IP_ADD_LENGTH] = {0,0,0,0};
 uint8_t ipSubnetMask[IP_ADD_LENGTH] = {255,255,255,0};
 uint8_t ipGwAddress[IP_ADD_LENGTH] = {0,0,0,0};
+uint8_t mqttBrokerIpAddress[IP_ADD_LENGTH] = {0,0,0,0};
+uint8_t mqttBrokerMacAddress[HW_ADD_LENGTH] = {0,0,0,0,0,0};
 bool    dhcpEnabled = true;
 
 //-----------------------------------------------------------------------------
@@ -608,7 +614,7 @@ void etherSendPingResponse(etherHeader *ether)
     etherPutPacket(ether, sizeof(etherHeader) + ntohs(ip->length));
 }
 
-// Determines whether packet is ARP
+// Determines whether packet is ARP request
 bool etherIsArpRequest(etherHeader *ether)
 {
     arpPacket *arp = (arpPacket*)ether->data;
@@ -622,6 +628,23 @@ bool etherIsArpRequest(etherHeader *ether)
     }
     if (ok)
         ok = (arp->op == htons(1));
+    return ok;
+}
+
+//Determines whether packet is ARP reply
+bool etherIsArpReply(etherHeader* ether)
+{
+    arpPacket *arp = (arpPacket*)ether->data;
+    bool ok;
+    uint8_t i = 0;
+    ok = (ether->frameType == htons(0x0806));
+    while (ok & (i < IP_ADD_LENGTH))
+    {
+        ok = (arp->destIp[i] == ipAddress[i]);
+        i++;
+    }
+    if (ok)
+        ok = (arp->op == htons(2));
     return ok;
 }
 
@@ -872,4 +895,121 @@ void etherGetMacAddress(uint8_t mac[6])
     uint8_t i;
     for (i = 0; i < 6; i++)
         mac[i] = macAddress[i];
+}
+
+// Set MQTT Broker Address
+void etherSetMqttBrokerIp(uint8_t mqttBIp0,uint8_t mqttBIp1,uint8_t mqttBIp2,uint8_t mqttBIp3)
+{
+    mqttBrokerIpAddress[0] = mqttBIp0;
+    mqttBrokerIpAddress[1] = mqttBIp1;
+    mqttBrokerIpAddress[2] = mqttBIp2;
+    mqttBrokerIpAddress[3] = mqttBIp3;
+}
+
+// Gets MqttBroker IP Address
+void etherGetMqttBrokerIpAddress(uint8_t mqttBIp[4])
+{
+    uint8_t i;
+    for (i = 0; i < 4; i++)
+        mqttBIp[i] = mqttBrokerIpAddress[i];
+}
+
+// Sets MQTT Broker MAC Address
+void etherSetMqttBrokerHW(uint8_t mqttBMac0,uint8_t mqttBMac1,uint8_t mqttBMac2,uint8_t mqttBMac3,uint8_t mqttBMac4,uint8_t mqttBMac5)
+{
+    mqttBrokerMacAddress[0] = mqttBMac0;
+    mqttBrokerMacAddress[1] = mqttBMac1;
+    mqttBrokerMacAddress[2] = mqttBMac2;
+    mqttBrokerMacAddress[3] = mqttBMac3;
+    mqttBrokerMacAddress[4] = mqttBMac4;
+    mqttBrokerMacAddress[5] = mqttBMac5;
+}
+
+// Gets MQTT Broker MAC address
+void etherGetMqttBrokerMacAddress(uint8_t mqttBMac[6])
+{
+    uint8_t i;
+    for (i = 0; i < 6; i++)
+        mqttBMac[i] = mqttBrokerMacAddress[i];
+}
+
+//Store MAC Address from ARP response
+void etherStoreMqttMacAddress(etherHeader* ether)
+{
+    arpPacket *arp = (arpPacket*)ether->data;
+    uint8_t i;
+    for(i = 0; i < HW_ADD_LENGTH; i++)
+    {
+        mqttBrokerMacAddress[i] = arp->sourceAddress[i];
+    }
+}
+
+//Fills up the Socket
+void etherFillUpMqttConnectionSocket(socket* s)
+{
+    etherGetMqttBrokerMacAddress(s->destAddress);
+    etherGetMacAddress(s->sourceAddress);
+    etherGetMqttBrokerIpAddress(s->destIp);
+    etherGetIpAddress(s->sourceIp);
+    s->destPort = htons(1883);
+    s->sourcePort = htons(1883);
+}
+//Sends a TCP Message
+void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
+{
+    uint8_t i,tcpDataOffset;
+    etherFillUpMqttConnectionSocket(s);
+    //Fill up ethernet Header
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ether->sourceAddress[i] = s->sourceAddress[i];
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ether->destAddress[i] = s->destAddress[i];
+    ether->frameType = htons(0x0800);
+
+    ipHeader* ip = (ipHeader*)&ether->data;
+    //Fill up IP Header from socket
+    for(i = 0;i < IP_ADD_LENGTH;i++)
+        ip->sourceIp[i] = s->sourceIp[i];
+    for(i = 0;i < IP_ADD_LENGTH;i++)
+        ip->destIp[i] = s->destIp[i];
+    ip->revSize = 0x45;
+    ip->typeOfService = 0x00;
+    ip->id = 0x0000;
+    ip->flagsAndOffset = 0x0000;
+    ip->protocol = 6;
+    ip->ttl = 128;
+
+    tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip +((ip->revSize & 0xF) * 4));
+    tcp->sourcePort = s->sourcePort;
+    tcp->destPort = s->destPort;
+    tcp->sequenceNumber = 0x00000000;
+    tcp->acknowledgementNumber = 0x00000000;
+    tcp->urgentPointer = 0x0000;
+    tcpDataOffset = 5;
+    tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_SYNC);
+    tcp->windowSize = htons(1200);
+
+    //Calculate length of IP message and IP header Checksum
+    ip->length = htons(((ip->revSize & 0xF) * 4) + tcpDataOffset * 4);
+    etherCalcIpChecksum(ip);
+
+
+    //Calculate size of TCP Header
+    uint32_t sum = 0;
+    etherSumWords(ip->sourceIp, 8, &sum);
+    etherSumWords((uint8_t*)ip->protocol, 1, &sum);
+    uint16_t tcpLength = htons(tcpDataOffset * 4);
+    etherSumWords((uint16_t*)tcpLength, 2, &sum);
+
+/*    uint16_t tcpLength = htons(tcpDataOffset * 4);
+    temp = ip->protocol;
+    sum += (temp & 0xFF) << 8;
+    etherSumWords((uint16_t*)tcpLength, 2, &sum);
+*/
+
+    etherSumWords(tcp, 20, &sum);
+    tcp->checksum = getEtherChecksum(sum);
+
+    etherPutPacket(ether, sizeof(etherHeader) + ((ip->revSize & 0xF) * 4) + tcpDataOffset * 4 );
+
 }
