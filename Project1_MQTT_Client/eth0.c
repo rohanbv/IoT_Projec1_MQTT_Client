@@ -1003,14 +1003,25 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
         tcp->acknowledgementNumber = tcp->acknowledgementNumber + htonl(1);
     }
     tcp->urgentPointer = 0x0000;
-    tcp->windowSize = htons(1200);
+    tcp->windowSize = htons(1220);
 
-    tcpDataOffset = 5;
+
     if(flags == TCP_SYNC)
+    {
+        tcpDataOffset = 6;
         tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_SYNC);
+        //Hardcoding up the options field
+         uint8_t *tcpOptions = (uint8_t*)&tcp->data;
+         tcpOptions[0] = 0x02;  //Kind
+         tcpOptions[1] = 0x04;  //Length
+         tcpOptions[2] = 0x04;  //Value
+         tcpOptions[3] = 0xc4;
+    }
     if(flags == TCP_ACK)
+    {
+        tcpDataOffset = 5;
         tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_ACK);
-
+    }
 
     //Calculate length of IP message and IP header Checksum
     ip->length = htons(((ip->revSize & 0xF) * 4) + tcpDataOffset * 4);
@@ -1026,7 +1037,7 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
     tcpLength = htons(tcpDataOffset * 4);
     sum+= tcpLength;
     //add contents of tcp message
-    etherSumWords(tcp, 20, &sum);
+    etherSumWords(tcp, tcpDataOffset * 4, &sum);
     tcp->checksum = getEtherChecksum(sum);
 
     etherPutPacket(ether, sizeof(etherHeader) + ((ip->revSize & 0xF) * 4) + tcpDataOffset * 4 );
