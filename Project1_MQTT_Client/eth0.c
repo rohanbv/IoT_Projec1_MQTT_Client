@@ -117,10 +117,6 @@
 #define IP_ADD_LENGTH 4
 #define HW_ADD_LENGTH 6
 
-
-// TCP Flags
-#define TCP_SYNC 0x02
-
 // ------------------------------------------------------------------------------
 //  Globals
 // ------------------------------------------------------------------------------
@@ -134,6 +130,8 @@ uint8_t ipSubnetMask[IP_ADD_LENGTH] = {255,255,255,0};
 uint8_t ipGwAddress[IP_ADD_LENGTH] = {0,0,0,0};
 uint8_t mqttBrokerIpAddress[IP_ADD_LENGTH] = {0,0,0,0};
 uint8_t mqttBrokerMacAddress[HW_ADD_LENGTH] = {0,0,0,0,0,0};
+extern uint32_t sequenceNumber;
+extern uint32_t acknowledgementNumber;
 bool    dhcpEnabled = true;
 
 //-----------------------------------------------------------------------------
@@ -539,6 +537,13 @@ uint16_t htons(uint16_t value)
     return ((value & 0xFF00) >> 8) + ((value & 0x00FF) << 8);
 }
 #define ntohs htons
+
+
+uint32_t htonl(uint32_t value)
+{
+    return ((value & 0xFF000000) >> 24) + ((value & 0x00FF0000) >> 8)
+            + ((value & 0x0000FF00) << 8) + ((value & 0x000000FF) << 24);
+}
 
 // Determines whether packet is IP datagram
 bool etherIsIp(etherHeader *ether)
@@ -952,8 +957,9 @@ void etherFillUpMqttConnectionSocket(socket* s)
     etherGetMqttBrokerIpAddress(s->destIp);
     etherGetIpAddress(s->sourceIp);
     s->destPort = htons(1883);
-    s->sourcePort = htons(1883);
+    s->sourcePort = htons(110);
 }
+
 //Sends a TCP Message
 void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
 {
@@ -980,36 +986,74 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
     ip->ttl = 128;
 
     tcpHeader* tcp = (tcpHeader*)((uint8_t*)ip +((ip->revSize & 0xF) * 4));
+    //Fill up Tcp Header
     tcp->sourcePort = s->sourcePort;
     tcp->destPort = s->destPort;
-    tcp->sequenceNumber = 0x00000000;
-    tcp->acknowledgementNumber = 0x00000000;
+    if(flags == TCP_SYNC)
+    {
+        tcp->sequenceNumber = 0;
+        tcp->acknowledgementNumber = 0;
+    }
+    else
+    {
+        uint32_t temp32;
+        temp32 = tcp->acknowledgementNumber;
+        tcp->acknowledgementNumber = tcp->sequenceNumber;
+        tcp->sequenceNumber = temp32;
+        tcp->acknowledgementNumber = tcp->acknowledgementNumber + htonl(1);
+    }
     tcp->urgentPointer = 0x0000;
-    tcpDataOffset = 5;
-    tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_SYNC);
     tcp->windowSize = htons(1200);
+
+    tcpDataOffset = 5;
+    if(flags == TCP_SYNC)
+        tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_SYNC);
+    if(flags == TCP_ACK)
+        tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_ACK);
+
 
     //Calculate length of IP message and IP header Checksum
     ip->length = htons(((ip->revSize & 0xF) * 4) + tcpDataOffset * 4);
     etherCalcIpChecksum(ip);
 
-
     //Calculate size of TCP Header
+    tcp->checksum = 0;
     uint32_t sum = 0;
+    uint16_t temp = 0,tcpLength = 0;
     etherSumWords(ip->sourceIp, 8, &sum);
-    etherSumWords((uint8_t*)ip->protocol, 1, &sum);
-    uint16_t tcpLength = htons(tcpDataOffset * 4);
-    etherSumWords((uint16_t*)tcpLength, 2, &sum);
-
-/*    uint16_t tcpLength = htons(tcpDataOffset * 4);
-    temp = ip->protocol;
-    sum += (temp & 0xFF) << 8;
-    etherSumWords((uint16_t*)tcpLength, 2, &sum);
-*/
-
+    temp = (ip->protocol & 0xff) << 8;
+    sum += temp;
+    tcpLength = htons(tcpDataOffset * 4);
+    sum+= tcpLength;
+    //add contents of tcp message
     etherSumWords(tcp, 20, &sum);
     tcp->checksum = getEtherChecksum(sum);
 
     etherPutPacket(ether, sizeof(etherHeader) + ((ip->revSize & 0xF) * 4) + tcpDataOffset * 4 );
-
 }
+
+//Is it a TCP packet
+bool etherIsTcp(etherHeader *ether)
+{
+    bool ok;
+    ipHeader *ip = (ipHeader*)ether->data;
+    ok = (ip->protocol == 0x06);
+    return ok;
+}
+
+bool etherIsTcpAck(etherHeader *ether)
+{
+    bool ok = false;
+    if(etherIsTcp(ether))
+            {
+                ipHeader *ip = (ipHeader*)ether->data;
+                uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+                tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+                uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
+                ok = (tcpFieldType == TCP_SYNACK);
+                return ok;
+            }
+    return ok;
+}
+
+

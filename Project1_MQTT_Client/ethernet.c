@@ -80,6 +80,11 @@
 #define MQTT_STORED_PERSITENTLY 200
 #define IP_IN_EEPROM            readEeprom(0x0000) == IP_STORED_PERSISTENTLY
 #define MQTT_IN_EEPROM          readEeprom(0x0010) == MQTT_STORED_PERSITENTLY
+
+//Globals
+uint32_t sequenceNumber        = 0;
+uint32_t acknowledgementNumber = 0;
+
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -192,6 +197,7 @@ int main(void)
     etherHeader *data = (etherHeader*) buffer;
     socket s;
     USER_DATA info;
+    state currentState = idle;
 
     // Init controller
     initHw();
@@ -282,15 +288,36 @@ int main(void)
             //Is command Connect,Send arp and get MAC address of MQTT server
             else if(isCommand(&info, "CONNECT", 0))
             {
-                uint8_t mqttBIp[4];
-                etherGetMqttBrokerIpAddress(mqttBIp);
-                etherSendArpRequest(data,mqttBIp);
+                currentState = sendArpReq;
             }
             else
             {
                 putsUart0("Enter a Valid Command\r\n");
             }
 
+        }
+
+        //Check if the machine is in sendArpReq,if it is then send and wait for Arp Response
+        if(currentState == sendArpReq)
+        {
+            uint8_t mqttBIp[4];
+            etherGetMqttBrokerIpAddress(mqttBIp);
+            etherSendArpRequest(data,mqttBIp);
+            currentState = waitArpRes;
+        }
+
+        //Check if the machine is in sendSync state,if its send sync message and wait for syncack
+        if(currentState == sendTcpSyn)
+        {
+            etherSendTcp(data, &s, TCP_SYNC);
+            currentState = waitTcpSynAck;
+        }
+
+        if(currentState == sendTcpAck)
+        {
+            etherSendTcp(data, &s, TCP_ACK);
+            setPinValue(BLUE_LED, 1);
+            currentState = tcpConnectionActive;
         }
 
         // Packet processing
@@ -313,10 +340,10 @@ int main(void)
             }
 
             //Handle ARP Reply
-            if(etherIsArpReply(data))
+            if(etherIsArpReply(data) && (currentState == waitArpRes))
             {
                 etherStoreMqttMacAddress(data);
-                etherSendTcp(data, &s, 0);
+                currentState = sendTcpSyn;
             }
 
             // Handle IP datagram
@@ -324,6 +351,23 @@ int main(void)
             {
             	if (etherIsIpUnicast(data))
             	{
+            	    //Handle TCP Datagrams
+            	    if(etherIsTcp(data))
+            	    {
+            	        //Is it Ack To a Sync Message?
+            	        if(etherIsTcpAck(data) && (currentState == waitTcpSynAck))
+            	        {
+            	            //Update Sequence and Acknowledge Numbers
+                            etherHeader* ether = (etherHeader*)data;
+            	            ipHeader *ip = (ipHeader*)ether->data;
+                            uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+                            tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+                            acknowledgementNumber = tcp->sequenceNumber;
+                            sequenceNumber = tcp->acknowledgementNumber;
+                            currentState = sendTcpAck;
+            	        }
+            	    }
+
             		// handle icmp ping request
 					if (etherIsPingRequest(data))
 					{

@@ -136,6 +136,18 @@ typedef struct _socket
   uint8_t  destAddress[6];
 } socket;
 
+typedef enum
+{
+    idle,
+    sendArpReq,
+    waitArpRes,
+    sendTcpSyn,
+    waitTcpSynAck,
+    sendTcpAck,
+    tcpConnectionActive
+
+} state;
+
 #define ETHER_UNICAST        0x80
 #define ETHER_BROADCAST      0x01
 #define ETHER_MULTICAST      0x02
@@ -149,6 +161,11 @@ typedef struct _socket
 
 #define LOBYTE(x) ((x) & 0xFF)
 #define HIBYTE(x) (((x) >> 8) & 0xFF)
+
+// TCP Flags
+#define TCP_SYNC    0x02
+#define TCP_SYNACK  0x12
+#define TCP_ACK     0x10
 
 //-----------------------------------------------------------------------------
 // Subroutines
@@ -198,8 +215,11 @@ void etherStoreMqttMacAddress(etherHeader* ether);
 void etherFillUpMqttConnectionSocket();
 
 void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags);
+bool etherIsTcp(etherHeader *ether);
+bool etherIsTcpAck(etherHeader *ether);
 
 uint16_t htons(uint16_t value);
+uint32_t htonl(uint32_t value);
 #define ntohs htons
 
 #endif
