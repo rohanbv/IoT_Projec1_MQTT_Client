@@ -29,6 +29,7 @@
 #include "wait.h"
 #include "gpio.h"
 #include "spi0.h"
+#include "uart0.h"
 
 // Pins
 #define CS PORTA,3
@@ -132,6 +133,7 @@ uint8_t mqttBrokerIpAddress[IP_ADD_LENGTH] = {0,0,0,0};
 uint8_t mqttBrokerMacAddress[HW_ADD_LENGTH] = {0,0,0,0,0,0};
 extern uint32_t sequenceNumber;
 extern uint32_t acknowledgementNumber;
+extern uint32_t payLoadLength;
 bool    dhcpEnabled = true;
 
 //-----------------------------------------------------------------------------
@@ -961,9 +963,10 @@ void etherFillUpMqttConnectionSocket(socket* s)
 }
 
 //Sends a TCP Message
-void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
+void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags,uint8_t* tcpData,uint16_t dataLength)
 {
     uint8_t i,tcpDataOffset;
+    uint8_t* copyData;
     etherFillUpMqttConnectionSocket(s);
     //Fill up ethernet Header
     for(i = 0;i < HW_ADD_LENGTH;i++)
@@ -991,16 +994,15 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
     tcp->destPort = s->destPort;
     if(flags == TCP_SYNC)
     {
-        tcp->sequenceNumber = 0;
-        tcp->acknowledgementNumber = 0;
+        sequenceNumber = 0;
+        acknowledgementNumber = 0;
+        tcp->sequenceNumber = sequenceNumber;
+        tcp->acknowledgementNumber = acknowledgementNumber;
     }
     else
     {
-        uint32_t temp32;
-        temp32 = tcp->acknowledgementNumber;
-        tcp->acknowledgementNumber = tcp->sequenceNumber;
-        tcp->sequenceNumber = temp32;
-        tcp->acknowledgementNumber = tcp->acknowledgementNumber + htonl(1);
+        tcp->sequenceNumber = sequenceNumber;
+        tcp->acknowledgementNumber = acknowledgementNumber;
     }
     tcp->urgentPointer = 0x0000;
     tcp->windowSize = htons(1220);
@@ -1017,31 +1019,38 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags)
          tcpOptions[2] = 0x04;  //Value
          tcpOptions[3] = 0xc4;
     }
-    if(flags == TCP_ACK)
+    if(flags == TCP_ACK || flags == TCP_FIN_ACK || flags == TCP_RESET || flags == TCP_REST_ACK)
     {
         tcpDataOffset = 5;
-        tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_ACK);
+        tcp->offsetFields = htons((tcpDataOffset << 12) + flags);
     }
-
+    if(flags == TCP_PUSH_ACK)
+    {
+        tcpDataOffset = 5;
+        tcp->offsetFields = htons((tcpDataOffset << 12) + TCP_PUSH_ACK);
+        copyData = tcp->data;
+        for(i = 0;i < dataLength;i++)
+            copyData[i] = tcpData[i];
+    }
+    uint16_t tcpLength = (tcpDataOffset*4) + dataLength;
     //Calculate length of IP message and IP header Checksum
-    ip->length = htons(((ip->revSize & 0xF) * 4) + tcpDataOffset * 4);
+    ip->length = htons(((ip->revSize & 0xF) * 4) + tcpLength);
     etherCalcIpChecksum(ip);
 
     //Calculate size of TCP Header
     tcp->checksum = 0;
     uint32_t sum = 0;
-    uint16_t temp = 0,tcpLength = 0;
+    uint16_t temp = 0;
     etherSumWords(ip->sourceIp, 8, &sum);
     temp = (ip->protocol & 0xff) << 8;
     sum += temp;
-    tcpLength = htons(tcpDataOffset * 4);
-    sum+= tcpLength;
+    sum+= htons(tcpLength);
     //add contents of tcp message
-    etherSumWords(tcp, tcpDataOffset * 4, &sum);
+    etherSumWords(tcp, (tcpLength), &sum);
     tcp->checksum = getEtherChecksum(sum);
-
-    etherPutPacket(ether, sizeof(etherHeader) + ((ip->revSize & 0xF) * 4) + tcpDataOffset * 4 );
+    etherPutPacket(ether, sizeof(etherHeader) + ((ip->revSize & 0xF) * 4) + tcpLength);
 }
+
 
 //Is it a TCP packet
 bool etherIsTcp(etherHeader *ether)
@@ -1052,6 +1061,7 @@ bool etherIsTcp(etherHeader *ether)
     return ok;
 }
 
+//Is it a TCP Acknowledgement
 bool etherIsTcpAck(etherHeader *ether)
 {
     bool ok = false;
@@ -1061,10 +1071,187 @@ bool etherIsTcpAck(etherHeader *ether)
                 uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
                 tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
                 uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
-                ok = (tcpFieldType == TCP_SYNACK);
+                ok = (tcpFieldType == TCP_SYNACK || tcpFieldType == TCP_ACK || tcpFieldType == TCP_PUSH_ACK || tcpFieldType == TCP_FIN_ACK);
                 return ok;
             }
     return ok;
 }
 
+bool etherIsTcpFinAck(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
+    ok = (tcpFieldType == TCP_FIN_ACK);
+    return ok;
+}
 
+//Check if the packet is Mqtt Connection Acknowledgement
+bool etherIsMqttConnectAck(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint8_t* copyData = tcp->data;
+    if(ok)
+    {
+        ok = (copyData[0] == 0x20); //Is it Connect Ack Mqtt Payload
+        ok &= (copyData[2] == 0x00);//It it an accepted connection
+    }
+    return ok;
+}
+
+//Check if the packet is Mqtt SubscribeAck Packet
+bool etherIsMqttSubAck(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint8_t* copyData = tcp->data;
+    if(ok)
+    {
+        ok &= (copyData[0] == 0x90);
+        payLoadLength = copyData[1] + 2;
+    }
+    return ok;
+}
+
+//Check if the packet is Mqtt UnSubscribeAck Packet
+bool etherIsMqttUnSubAck(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint8_t* copyData = tcp->data;
+    if(ok)
+    {
+        ok &= (copyData[0] == 0x30);
+        payLoadLength = copyData[1] + 2;
+    }
+    return ok;
+}
+
+//Check if the packet is Mqtt UnSubscribeAck Packet
+bool etherIsMqttPublish(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint8_t* copyData = tcp->data;
+    if(ok)
+    {
+        ok &= (copyData[0] == 0xb0);
+        payLoadLength = copyData[1] + 2;
+    }
+    return ok;
+}
+
+
+//Create a MQTT connect Data Payload
+uint8_t* etherMqttCreateConnectPayload(uint8_t* mqttPayload)
+{
+    mqttPayload[0] = 0x10;
+    mqttPayload[1] = 15;
+    mqttPayload[2] = 0x00;
+    mqttPayload[3] = 0x04;
+    mqttPayload[4] = (uint8_t)'M';
+    mqttPayload[5] = (uint8_t)'Q';
+    mqttPayload[6] = (uint8_t)'T';
+    mqttPayload[7] = (uint8_t)'T';
+    mqttPayload[8] = 0x04;
+    mqttPayload[9] = 0x02;
+    mqttPayload[10] = 0x00;
+    mqttPayload[11] = 0x3c;
+    mqttPayload[12] = 0x00;
+    mqttPayload[13] = 0x03;
+    mqttPayload[14] = (uint8_t)'r';
+    mqttPayload[15] = (uint8_t)'b';
+    mqttPayload[16] = (uint8_t)'v';
+    payLoadLength = mqttPayload[1]+2;
+    return mqttPayload;
+}
+
+//Creates a Mqtt Subscribe payload to topic subTopic
+uint8_t* etherMqttCreateSubscribePayload(uint8_t* mqttPayload,char* subTopic)
+{
+    uint16_t subTopicLength = strLen(subTopic);
+    uint8_t i;
+    mqttPayload[0] = 0x82;
+    mqttPayload[1] = subTopicLength + 2 + 2 + 1;
+    mqttPayload[2] = 0x00;
+    mqttPayload[3] = 0x0C;
+    uint16_t* ptr = (uint16_t*)&mqttPayload[4];
+    *ptr = htons(subTopicLength);
+    for(i = 0;i < subTopicLength; i++)
+        mqttPayload[i+6] = subTopic[i];
+    mqttPayload[i+6] = 0x00;
+    payLoadLength = mqttPayload[1]+2;
+    return mqttPayload;
+}
+
+//Creates a Mqtt Unsubscribe Payload to topic subTopic
+uint8_t* etherMqttCreateUnSubscribePayload(uint8_t* mqttPayload,char* subTopic)
+{
+    uint16_t subTopicLength = strLen(subTopic);
+    uint8_t i;
+    mqttPayload[0] = 0xA2;
+    mqttPayload[1] = subTopicLength + 2 + 2;
+    mqttPayload[2] = 0x00;
+    mqttPayload[3] = 0x0C;
+    uint16_t* ptr = (uint16_t*)&mqttPayload[4];
+    *ptr = htons(subTopicLength);
+    for(i = 0;i < subTopicLength; i++)
+        mqttPayload[i+6] = subTopic[i];
+    mqttPayload[i+6] = 0x00;
+    payLoadLength = mqttPayload[1]+2;
+    return mqttPayload;
+}
+
+//Creates a Mqtt Topic Payload with passed parametres topic and data
+uint8_t* etherMqttCreatePublishPayload(uint8_t* mqttPayload,char* topic,char* data)
+{
+    uint8_t i,j;
+    uint16_t topicLength = strLen(topic);
+    uint16_t dataLength = strLen(data);
+    mqttPayload[0] = 0x30;
+    mqttPayload[1] = topicLength + dataLength + 2 + 2;
+    uint16_t* ptr = (uint16_t*)&mqttPayload[2];
+    *ptr = htons(topicLength);
+    for(i = 0;i < topicLength;i++)
+        mqttPayload[i+4] = topic[i];
+    mqttPayload[i+4] = 0x10;
+    mqttPayload[i+5] = 0x11 + i;
+    for(j = 0;j < dataLength;j++)
+        mqttPayload[i+6+j] = data[j];
+    payLoadLength = mqttPayload[1] + 2;
+    return mqttPayload;
+}
+
+uint8_t* etherMqttCreateDisconnectPayload(uint8_t* mqttPayload)
+{
+    mqttPayload[0] = 0xE0;
+    mqttPayload[1] = 0x00;
+    payLoadLength = 2;
+    return mqttPayload;
+}

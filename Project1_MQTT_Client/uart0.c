@@ -240,22 +240,22 @@ bool isCommand(USER_DATA* data,char verb[20],uint8_t minField)
     }
     else if (stringCompare(verb,"DISCONNECT") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "CONNECT") == true) && (data->fieldCount >= minField+1))
+        if ((stringCompare(getFieldString(data,1), "DISCONNECT") == true) && (data->fieldCount >= minField+1))
         return true;
     }
     else if (stringCompare(verb,"SUBSCRIBE") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "CONNECT") == true) && (data->fieldCount >= minField+2))
+        if ((stringCompare(getFieldString(data,1), "SUBSCRIBE") == true) && (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"UNSUBSCRIBE") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "CONNECT") == true) && (data->fieldCount >= minField+2))
+        if ((stringCompare(getFieldString(data,1), "UNSUBSCRIBE") == true) && (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"PUBLISH") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "PUBLISH") == true) && (data->fieldCount >= minField+3))
+        if ((stringCompare(getFieldString(data,1), "PUBLISH") == true) && (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"SET") == true)
@@ -349,4 +349,14 @@ char* itoa(int num,char* str, int base)
     reverse(str, i);
 
     return str;
+}
+
+uint16_t strLen(char* string)
+{
+    uint16_t i = 0;
+    while(string[i] != 0)
+    {
+        i++;
+    }
+    return i;
 }

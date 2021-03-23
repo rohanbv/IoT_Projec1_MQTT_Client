@@ -54,5 +54,6 @@ bool isCommand(USER_DATA* data,char verb[20],uint8_t minField);
 bool stringCompare(char str1[], char str2[]);
 char* itoa(int num,char* str, int base);
 void reverse(char* s, uint8_t l);
+uint16_t strLen(char* string);
 
 #endif

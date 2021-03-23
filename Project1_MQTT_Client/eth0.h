@@ -123,8 +123,15 @@ typedef struct _tcpHeader // 20 or more bytes
   uint16_t windowSize;
   uint16_t checksum;
   uint16_t urgentPointer;
-  uint8_t  data;
+  uint8_t  data[0];
 } tcpHeader;
+
+typedef struct _mqttPayload
+{
+  uint8_t fixedHeader;
+  uint8_t remainingLength;
+  uint8_t varHeaderPayload[0];
+} mqttPayload;
 
 typedef struct _socket
 {
@@ -144,8 +151,16 @@ typedef enum
     sendTcpSyn,
     waitTcpSynAck,
     sendTcpAck,
-    tcpConnectionActive
-
+    tcpConnectionActive,
+    waitForConectAck,
+    mqttSocketLive,
+    sendSubPacket,
+    sendUnSubPacket,
+    sendPublishPacket,
+    sendDisconnect,
+    waitForFinAck,
+    acknowLedgeConnection,
+    closeConnection
 } state;
 
 #define ETHER_UNICAST        0x80
@@ -163,10 +178,14 @@ typedef enum
 #define HIBYTE(x) (((x) >> 8) & 0xFF)
 
 // TCP Flags
-#define TCP_SYNC    0x02
-#define TCP_SYNACK  0x12
-#define TCP_ACK     0x10
-
+#define TCP_SYNC     0x02
+#define TCP_SYNACK   0x12
+#define TCP_ACK      0x10
+#define TCP_PUSH_ACK 0x18
+#define TCP_FIN_ACK  0x11
+#define TCP_FIN      0x01
+#define TCP_RESET    0x04
+#define TCP_REST_ACK 0x14
 //-----------------------------------------------------------------------------
 // Subroutines
 //-----------------------------------------------------------------------------
@@ -214,9 +233,21 @@ void etherGetMqttBrokerMacAddress(uint8_t mqttBMac[6]);
 void etherStoreMqttMacAddress(etherHeader* ether);
 void etherFillUpMqttConnectionSocket();
 
-void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags);
+void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags,uint8_t* tcpData,uint16_t dataLength);
 bool etherIsTcp(etherHeader *ether);
 bool etherIsTcpAck(etherHeader *ether);
+bool etherIsTcpFinAck(etherHeader* ether);
+
+uint8_t* etherMqttCreateConnectPayload(uint8_t* mqttPayload);
+uint8_t* etherMqttCreateSubscribePayload(uint8_t* mqttPayload,char* subTopic);
+uint8_t* etherMqttCreateUnSubscribePayload(uint8_t* mqttPayload,char* subTopic);
+uint8_t* etherMqttCreatePublishPayload(uint8_t* mqttPayload,char* topic,char* data);
+uint8_t* etherMqttCreateDisconnectPayload(uint8_t* mqttPayload);
+
+bool etherIsMqttConnectAck(etherHeader* ether);
+bool etherIsMqttSubAck(etherHeader* ether);
+bool etherIsMqttUnSubAck(etherHeader* ether);
+bool etherIsMqttPublish(etherHeader* ether);
 
 uint16_t htons(uint16_t value);
 uint32_t htonl(uint32_t value);

@@ -82,9 +82,9 @@
 #define MQTT_IN_EEPROM          readEeprom(0x0010) == MQTT_STORED_PERSITENTLY
 
 //Globals
-uint32_t sequenceNumber        = 0;
+uint32_t sequenceNumber = 0;
 uint32_t acknowledgementNumber = 0;
-
+uint32_t payLoadLength = 0;
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -189,10 +189,15 @@ void displayConnectionInfo()
 // Max packet is calculated as:
 // Ether frame header (18) + Max MTU (1500) + CRC (4)
 #define MAX_PACKET_SIZE 1522
-
+#define MAX_PAYLOAD 50
 int main(void)
 {
     uint8_t* udpData;
+    uint8_t mqttPayload[MAX_PAYLOAD];
+    char* subTopic;
+    char* pubTopic;
+    char* pubData;
+    char* unSubTopic;
     uint8_t buffer[MAX_PACKET_SIZE];
     etherHeader *data = (etherHeader*) buffer;
     socket s;
@@ -290,6 +295,51 @@ int main(void)
             {
                 currentState = sendArpReq;
             }
+            else if(isCommand(&info, "SUBSCRIBE", 1))
+            {
+                if(currentState == mqttSocketLive)
+                {
+                    //parse the text field and build a mqtt packet for subscribe
+                    subTopic = getFieldString(&info, 2);
+                    currentState = sendSubPacket;
+                }
+                else
+                    putsUart0("Establish connection to Mqtt Broker before subscribing to a Topic\r\n");
+
+            }
+            else if(isCommand(&info, "UNSUBSCRIBE", 1))
+            {
+                if(currentState == mqttSocketLive)
+                {
+                    //parse the text field and build a mqtt packet for unsubscribe
+                    unSubTopic = getFieldString(&info, 2);
+                    currentState = sendUnSubPacket;
+                }
+                else
+                    putsUart0("Establish connection to Mqtt Broker before unsubscribing to a Topic\r\n");
+            }
+            else if(isCommand(&info, "PUBLISH", 2))
+            {
+                if(currentState == mqttSocketLive)
+                {
+                    //parse the text field and build a mqtt packet for Publish
+                    pubTopic = getFieldString(&info, 2);
+                    pubData = getFieldString(&info, 3);
+                    currentState = sendPublishPacket;
+                }
+                else
+                    putsUart0("Establish connection to Mqtt Broker before Publishing to a Topic\r\n");
+            }
+            else if(isCommand(&info, "DISCONNECT", 0))
+            {
+                if(currentState == mqttSocketLive)
+                {
+                    //parse the text field and build a mqtt packet for disconnect
+                    currentState = sendDisconnect;
+                }
+                else
+                    putsUart0("Establish connection to Mqtt Broker before disconnecting\r\n");
+            }
             else
             {
                 putsUart0("Enter a Valid Command\r\n");
@@ -309,15 +359,56 @@ int main(void)
         //Check if the machine is in sendSync state,if its send sync message and wait for syncack
         if(currentState == sendTcpSyn)
         {
-            etherSendTcp(data, &s, TCP_SYNC);
+            etherSendTcp(data, &s, TCP_SYNC,0,0);
             currentState = waitTcpSynAck;
         }
 
         if(currentState == sendTcpAck)
         {
-            etherSendTcp(data, &s, TCP_ACK);
+            etherSendTcp(data, &s, TCP_ACK,0,0);
             setPinValue(BLUE_LED, 1);
             currentState = tcpConnectionActive;
+        }
+
+        if(currentState == tcpConnectionActive)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK , etherMqttCreateConnectPayload(mqttPayload), mqttPayload[1]+2);
+            currentState = waitForConectAck;
+        }
+        if(currentState == acknowLedgeConnection)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK, 0, 0);
+            currentState = mqttSocketLive;
+        }
+        if(currentState == sendSubPacket)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK, etherMqttCreateSubscribePayload(mqttPayload,subTopic), mqttPayload[1]+2);
+            currentState = mqttSocketLive;
+        }
+
+        if(currentState == sendUnSubPacket)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK, etherMqttCreateUnSubscribePayload(mqttPayload, unSubTopic), mqttPayload[1]+2);
+            currentState = mqttSocketLive;
+        }
+
+        if(currentState == sendPublishPacket)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK, etherMqttCreatePublishPayload(mqttPayload, pubTopic, pubData), mqttPayload[1]+2);
+            currentState = mqttSocketLive;
+        }
+
+        if(currentState == sendDisconnect)
+        {
+            etherSendTcp(data, &s, TCP_PUSH_ACK, etherMqttCreateDisconnectPayload(mqttPayload), mqttPayload[1]+2);
+            currentState = waitForFinAck;
+        }
+
+        if(currentState == closeConnection)
+        {
+            etherSendTcp(data, &s, TCP_ACK, 0, 0);
+            etherSendTcp(data, &s, TCP_REST_ACK, 0, 0);
+            currentState = idle;
         }
 
         // Packet processing
@@ -355,16 +446,50 @@ int main(void)
             	    if(etherIsTcp(data))
             	    {
             	        //Is it Ack To a Sync Message?
-            	        if(etherIsTcpAck(data) && (currentState == waitTcpSynAck))
+            	        if(etherIsTcpAck(data))
             	        {
             	            //Update Sequence and Acknowledge Numbers
-                            etherHeader* ether = (etherHeader*)data;
-            	            ipHeader *ip = (ipHeader*)ether->data;
+            	            etherHeader* ether = (etherHeader*)data;
+                            ipHeader *ip = (ipHeader*)ether->data;
                             uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
                             tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
-                            acknowledgementNumber = tcp->sequenceNumber;
-                            sequenceNumber = tcp->acknowledgementNumber;
-                            currentState = sendTcpAck;
+                            uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
+                            //If its a TCP Sync Ack state update the state to next state
+                            if(currentState == waitTcpSynAck && tcpFieldType == TCP_SYNACK)
+                            {
+                                sequenceNumber = tcp->acknowledgementNumber;
+                                acknowledgementNumber = tcp->sequenceNumber + htonl(1);
+                                currentState = sendTcpAck;
+                            }
+
+                            //If its a Mqtt Connect Ack,make the state as MqttSocketLive
+                            if((currentState == waitForConectAck))
+                                if(etherIsMqttConnectAck(data) && tcpFieldType == TCP_PUSH_ACK)
+                                {
+                                    sequenceNumber = tcp->acknowledgementNumber;
+                                    acknowledgementNumber = tcp->sequenceNumber + htonl(4);
+                                    currentState = acknowLedgeConnection;
+                                }
+
+                            if(currentState == mqttSocketLive)
+                                if((etherIsMqttSubAck(data) || (etherIsMqttUnSubAck(data)) || (etherIsMqttPublish(data)))&& tcpFieldType == TCP_PUSH_ACK)
+                                {
+                                    if(etherIsMqttPublish(data))
+                                    {
+                                        //Print contents of the topic subscribed from the message
+                                    }
+                                    sequenceNumber = tcp->acknowledgementNumber;
+                                    acknowledgementNumber = tcp->sequenceNumber + htonl(payLoadLength);
+                                    currentState = acknowLedgeConnection;
+                                }
+
+                            if(currentState == waitForFinAck)
+                                if(etherIsTcpFinAck(data) && tcpFieldType == TCP_FIN_ACK)
+                                {
+                                    sequenceNumber = tcp->acknowledgementNumber;
+                                    acknowledgementNumber = tcp->sequenceNumber + htonl(1);
+                                    currentState = closeConnection;
+                                }
             	        }
             	    }
 
