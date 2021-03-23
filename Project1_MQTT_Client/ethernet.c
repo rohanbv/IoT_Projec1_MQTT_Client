@@ -415,8 +415,9 @@ int main(void)
 
         if(currentState == closeConnection)
         {
-            etherSendTcp(data, &s, TCP_ACK, 0, 0);
-            etherSendTcp(data, &s, TCP_REST_ACK, 0, 0);
+            etherSendTcp(data, &s, TCP_FIN, 0, 0);
+            etherSendTcp(data, &s, TCP_RESET, 0, 0);
+            setPinValue(BLUE_LED, 0);
             currentState = waitForServerReset;
         }
 

@@ -1020,7 +1020,7 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags,uint8_t* tcpData,u
          tcpOptions[2] = 0x04;  //Value
          tcpOptions[3] = 0xc4;
     }
-    if(flags == TCP_ACK || flags == TCP_FIN_ACK || flags == TCP_RESET || flags == TCP_REST_ACK)
+    if(flags == TCP_ACK || flags == TCP_FIN_ACK || flags == TCP_RESET || flags == TCP_REST_ACK || flags== TCP_FIN)
     {
         tcpDataOffset = 5;
         tcp->offsetFields = htons((tcpDataOffset << 12) + flags);
