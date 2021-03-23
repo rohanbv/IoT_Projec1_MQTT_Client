@@ -146,10 +146,10 @@ void parseFields(USER_DATA* data)
     uint8_t j=0;
     while(data->buffer[i] != '\0')       //Loop Until Strings last character
     {
-        if((data->buffer[i] >= 97) && (data->buffer[i] <= 122))     //convert all lower case characters to upper case for easier parsing
+        /*if((data->buffer[i] >= 97) && (data->buffer[i] <= 122))     //convert all lower case characters to upper case for easier parsing
         {
             data->buffer[i] = data->buffer[i] - 32;
-        }
+        }*/
         if(i==0)                //for first character check if useful or delimiter
         {
             if((data->buffer[i]>47 && data->buffer[i]<58) || (data->buffer[i]>64 && data->buffer[i]<91) || (data->buffer[i]>96 && data->buffer[i]<122) /*|| (data->buffer[i]==44) || (data->buffer[i]==46)*/)
@@ -225,42 +225,42 @@ bool isCommand(USER_DATA* data,char verb[20],uint8_t minField)
 {
     if (stringCompare(verb,"REBOOT") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "REBOOT") == true) && (data->fieldCount >= minField+1))
+        if (((stringCompare(getFieldString(data,1), "REBOOT") == true) || (stringCompare(getFieldString(data,1), "reboot") == true)) && (data->fieldCount >= minField+1))
         return true;
     }
     else if (stringCompare(verb,"STATUS") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "STATUS") == true) && (data->fieldCount >= minField+1))
+        if (((stringCompare(getFieldString(data,1), "STATUS") == true) || (stringCompare(getFieldString(data,1), "status") == true))&& (data->fieldCount >= minField+1))
         return true;
     }
     else if (stringCompare(verb,"CONNECT") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "CONNECT") == true) && (data->fieldCount >= minField+1))
+        if (((stringCompare(getFieldString(data,1), "CONNECT") == true) || (stringCompare(getFieldString(data,1), "connect") == true)) && (data->fieldCount >= minField+1))
         return true;
     }
     else if (stringCompare(verb,"DISCONNECT") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "DISCONNECT") == true) && (data->fieldCount >= minField+1))
+        if (((stringCompare(getFieldString(data,1), "DISCONNECT") == true) || (stringCompare(getFieldString(data,1), "disconnect") == true)) && (data->fieldCount >= minField+1))
         return true;
     }
     else if (stringCompare(verb,"SUBSCRIBE") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "SUBSCRIBE") == true) && (data->fieldCount >= minField+2))
+        if (((stringCompare(getFieldString(data,1), "SUBSCRIBE") == true) || (stringCompare(getFieldString(data,1), "subscribe") == true)) && (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"UNSUBSCRIBE") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "UNSUBSCRIBE") == true) && (data->fieldCount >= minField+2))
+        if (((stringCompare(getFieldString(data,1), "UNSUBSCRIBE") == true) || (stringCompare(getFieldString(data,1), "unsubscribe") == true)) && (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"PUBLISH") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "PUBLISH") == true) && (data->fieldCount >= minField+2))
+        if (((stringCompare(getFieldString(data,1), "PUBLISH") == true) || (stringCompare(getFieldString(data,1), "publish") == true))&& (data->fieldCount >= minField+2))
         return true;
     }
     else if (stringCompare(verb,"SET") == true)
     {
-        if ((stringCompare(getFieldString(data,1), "SET") == true) && ((stringCompare(getFieldString(data,2), "IP") == true) || (stringCompare(getFieldString(data,2), "MQTT") == true)) && (data->fieldCount >= minField+2))
+        if (((stringCompare(getFieldString(data,1), "SET") == true) || (stringCompare(getFieldString(data,1), "set") == true))&& ((stringCompare(getFieldString(data,2), "IP") == true) || (stringCompare(getFieldString(data,2), "MQTT") == true)) && (data->fieldCount >= minField+2))
         return true;
     }
     else

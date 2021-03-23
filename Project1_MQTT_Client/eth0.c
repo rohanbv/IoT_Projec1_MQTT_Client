@@ -24,6 +24,7 @@
 
 #include <eth0.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include "tm4c123gh6pm.h"
 #include "wait.h"
@@ -1142,7 +1143,7 @@ bool etherIsMqttUnSubAck(etherHeader* ether)
     uint8_t* copyData = tcp->data;
     if(ok)
     {
-        ok &= (copyData[0] == 0x30);
+        ok &= (copyData[0] == 0xb0);
         payLoadLength = copyData[1] + 2;
     }
     return ok;
@@ -1161,7 +1162,7 @@ bool etherIsMqttPublish(etherHeader* ether)
     uint8_t* copyData = tcp->data;
     if(ok)
     {
-        ok &= (copyData[0] == 0xb0);
+        ok &= (copyData[0] == 0x30);
         payLoadLength = copyData[1] + 2;
     }
     return ok;
@@ -1254,4 +1255,38 @@ uint8_t* etherMqttCreateDisconnectPayload(uint8_t* mqttPayload)
     mqttPayload[1] = 0x00;
     payLoadLength = 2;
     return mqttPayload;
+}
+
+void printPublishData(etherHeader* ether)
+{
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint8_t* copyData = tcp->data;
+    uint16_t* ptr = (uint16_t*)&copyData[2];
+    uint16_t topicLength = htons(*ptr);
+    char str[20];
+    uint8_t i,j;
+    putsUart0("Topic Length : ");
+    itoa((uint16_t)topicLength,str,10);
+    putsUart0(str);
+    putsUart0("\r\n");
+    putsUart0("Topic : ");
+    for(i = 0;i < topicLength;i++)
+    {
+        putcUart0((char)copyData[i+4]);
+    }
+    putsUart0("\r\n");
+    uint8_t dataLength = copyData[1] - 4 - topicLength;
+    putsUart0("Data Length : ");
+    itoa(dataLength, str, 10);
+    putsUart0(str);
+    putsUart0("\r\n");
+    putsUart0("Data : ");
+    for(j = 0;j < dataLength;j++)
+    {
+        putcUart0((char)copyData[i+j+6]);
+    }
+    putsUart0("\r\n");
+
 }

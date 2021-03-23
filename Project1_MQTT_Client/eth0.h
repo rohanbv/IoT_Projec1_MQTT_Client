@@ -160,7 +160,8 @@ typedef enum
     sendDisconnect,
     waitForFinAck,
     acknowLedgeConnection,
-    closeConnection
+    closeConnection,
+    keepConnectionAlive
 } state;
 
 #define ETHER_UNICAST        0x80
@@ -248,6 +249,8 @@ bool etherIsMqttConnectAck(etherHeader* ether);
 bool etherIsMqttSubAck(etherHeader* ether);
 bool etherIsMqttUnSubAck(etherHeader* ether);
 bool etherIsMqttPublish(etherHeader* ether);
+
+void printPublishData(etherHeader* ether);
 
 uint16_t htons(uint16_t value);
 uint32_t htonl(uint32_t value);

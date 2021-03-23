@@ -85,6 +85,8 @@
 uint32_t sequenceNumber = 0;
 uint32_t acknowledgementNumber = 0;
 uint32_t payLoadLength = 0;
+state currentState = idle;
+
 //-----------------------------------------------------------------------------
 // Subroutines                
 //-----------------------------------------------------------------------------
@@ -176,6 +178,7 @@ void displayConnectionInfo()
             putcUart0(':');
     }
     putsUart0("\r\n");
+
     if (etherIsLinkUp())
         putsUart0("Link is up\r\n");
     else
@@ -202,7 +205,6 @@ int main(void)
     etherHeader *data = (etherHeader*) buffer;
     socket s;
     USER_DATA info;
-    state currentState = idle;
 
     // Init controller
     initHw();
@@ -411,6 +413,11 @@ int main(void)
             currentState = idle;
         }
 
+        if(currentState == keepConnectionAlive)
+        {
+            etherSendTcp(data, &s, TCP_ACK, 0, 0);
+            currentState = mqttSocketLive;
+        }
         // Packet processing
         if (etherIsDataAvailable())
         {
@@ -472,17 +479,28 @@ int main(void)
                                 }
 
                             if(currentState == mqttSocketLive)
+                            {
                                 if((etherIsMqttSubAck(data) || (etherIsMqttUnSubAck(data)) || (etherIsMqttPublish(data)))&& tcpFieldType == TCP_PUSH_ACK)
                                 {
                                     if(etherIsMqttPublish(data))
                                     {
-                                        //Print contents of the topic subscribed from the message
+                                        //Print contents of the topic subscribed from the message to Putty
+                                        printPublishData(data);
                                     }
                                     sequenceNumber = tcp->acknowledgementNumber;
                                     acknowledgementNumber = tcp->sequenceNumber + htonl(payLoadLength);
                                     currentState = acknowLedgeConnection;
                                 }
-
+                                else
+                                {
+                                    if(tcpFieldType == TCP_ACK)
+                                    {
+                                        sequenceNumber = tcp->acknowledgementNumber;
+                                        acknowledgementNumber = tcp->sequenceNumber;
+                                        currentState = keepConnectionAlive;
+                                    }
+                                }
+                            }
                             if(currentState == waitForFinAck)
                                 if(etherIsTcpFinAck(data) && tcpFieldType == TCP_FIN_ACK)
                                 {
