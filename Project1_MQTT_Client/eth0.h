@@ -126,13 +126,6 @@ typedef struct _tcpHeader // 20 or more bytes
   uint8_t  data[0];
 } tcpHeader;
 
-typedef struct _mqttPayload
-{
-  uint8_t fixedHeader;
-  uint8_t remainingLength;
-  uint8_t varHeaderPayload[0];
-} mqttPayload;
-
 typedef struct _socket
 {
   uint16_t sourcePort;
@@ -145,23 +138,25 @@ typedef struct _socket
 
 typedef enum
 {
-    idle,
-    sendArpReq,
-    waitArpRes,
-    sendTcpSyn,
-    waitTcpSynAck,
-    sendTcpAck,
-    tcpConnectionActive,
-    waitForConectAck,
-    mqttSocketLive,
-    sendSubPacket,
-    sendUnSubPacket,
-    sendPublishPacket,
-    sendDisconnect,
-    waitForFinAck,
-    acknowLedgeConnection,
-    closeConnection,
-    keepConnectionAlive
+    idle = 1,
+    sendArpReq = 2,
+    waitArpRes = 3,
+    sendTcpSyn = 4,
+    waitTcpSynAck = 5,
+    sendTcpAck = 6,
+    tcpConnectionActive = 7,
+    waitForConectAck = 8,
+    mqttSocketLive = 9,
+    sendSubPacket = 10,
+    sendUnSubPacket = 11,
+    sendPublishPacket = 12,
+    keepConnectionAlive = 13,
+    sendDisconnect = 14,
+    waitForFinAck = 15,
+    acknowLedgeConnection = 16,
+    closeConnection = 17,
+    waitForServerReset = 18
+
 } state;
 
 #define ETHER_UNICAST        0x80
@@ -238,6 +233,7 @@ void etherSendTcp(etherHeader* ether,socket* s,uint16_t flags,uint8_t* tcpData,u
 bool etherIsTcp(etherHeader *ether);
 bool etherIsTcpAck(etherHeader *ether);
 bool etherIsTcpFinAck(etherHeader* ether);
+bool etherIsTcpResetAck(etherHeader* ether);
 
 uint8_t* etherMqttCreateConnectPayload(uint8_t* mqttPayload);
 uint8_t* etherMqttCreateSubscribePayload(uint8_t* mqttPayload,char* subTopic);

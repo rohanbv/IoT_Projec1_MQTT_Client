@@ -1072,7 +1072,7 @@ bool etherIsTcpAck(etherHeader *ether)
                 uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
                 tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
                 uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
-                ok = (tcpFieldType == TCP_SYNACK || tcpFieldType == TCP_ACK || tcpFieldType == TCP_PUSH_ACK || tcpFieldType == TCP_FIN_ACK);
+                ok = (tcpFieldType == TCP_SYNACK || tcpFieldType == TCP_ACK || tcpFieldType == TCP_PUSH_ACK || tcpFieldType == TCP_FIN_ACK || tcpFieldType == TCP_REST_ACK);
                 return ok;
             }
     return ok;
@@ -1089,6 +1089,20 @@ bool etherIsTcpFinAck(etherHeader* ether)
     tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
     uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
     ok = (tcpFieldType == TCP_FIN_ACK);
+    return ok;
+}
+
+bool etherIsTcpResetAck(etherHeader* ether)
+{
+    bool ok = true;
+    uint8_t i = 0;
+    for(i = 0;i < HW_ADD_LENGTH;i++)
+        ok &= (ether->destAddress[i] == macAddress[i]);
+    ipHeader *ip = (ipHeader*)ether->data;
+    uint8_t ipHeaderLength = (ip->revSize & 0xF) * 4;
+    tcpHeader *tcp = (tcpHeader*)((uint8_t*)ip + ipHeaderLength);
+    uint16_t tcpFieldType = htons(tcp->offsetFields) & 0x0FFF;
+    ok = (tcpFieldType == TCP_REST_ACK);
     return ok;
 }
 
@@ -1267,6 +1281,7 @@ void printPublishData(etherHeader* ether)
     uint16_t topicLength = htons(*ptr);
     char str[20];
     uint8_t i,j;
+    putsUart0("There has been a publish to topic you have subscribed\r\n");
     putsUart0("Topic Length : ");
     itoa((uint16_t)topicLength,str,10);
     putsUart0(str);

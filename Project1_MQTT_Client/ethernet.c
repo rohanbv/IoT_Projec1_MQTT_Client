@@ -178,11 +178,18 @@ void displayConnectionInfo()
             putcUart0(':');
     }
     putsUart0("\r\n");
-
     if (etherIsLinkUp())
         putsUart0("Link is up\r\n");
     else
         putsUart0("Link is down\r\n");
+    if(currentState > waitForConectAck && currentState < sendDisconnect)
+        putsUart0("Connected to Mqtt Server\r\n");
+    else
+        putsUart0("Not Connected to Mqtt Server\r\n");
+    if(currentState > sendTcpAck && currentState < closeConnection)
+        putsUart0("Tcp Connection is Active\r\n");
+    else
+        putsUart0("Tcp Connection is closed\r\n");
 }
 
 //-----------------------------------------------------------------------------
@@ -410,7 +417,7 @@ int main(void)
         {
             etherSendTcp(data, &s, TCP_ACK, 0, 0);
             etherSendTcp(data, &s, TCP_REST_ACK, 0, 0);
-            currentState = idle;
+            currentState = waitForServerReset;
         }
 
         if(currentState == keepConnectionAlive)
@@ -507,6 +514,11 @@ int main(void)
                                     sequenceNumber = tcp->acknowledgementNumber;
                                     acknowledgementNumber = tcp->sequenceNumber + htonl(1);
                                     currentState = closeConnection;
+                                }
+                            if(currentState == waitForServerReset)
+                                if(etherIsTcpResetAck(data))
+                                {
+                                    currentState = idle;
                                 }
             	        }
             	    }
